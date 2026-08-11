@@ -1,0 +1,8 @@
+{
+  "name": "Aoey's 36th Birthday Love Gacha",
+  "description": "A sweet, interactive gacha-style surprise app to celebrate Alita Athaso (Aoey)'s 36th birthday with randomized love messages and cute animations.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
