@@ -6,11 +6,13 @@ import {
   HeartHandshake, ThumbsUp, Smile, UserPlus, 
   MessageCircleHeart, Star, Settings, Trash2, 
   ArrowLeft, CheckCircle, Cake, Users,
-  Coffee, Droplet, ShoppingBag, Car, Home
+  Coffee, Droplet, ShoppingBag, Car, Home, X, Clock
 } from 'lucide-react';
 
 import { Card, GameState, UserType } from './types';
 import { GACHA_POOL_AOEY, GACHA_POOL_POND, EARN_TASKS, pullRandomCard, getRarityColor } from './data';
+import { gameStateRef } from './firebase';
+import { onSnapshot, setDoc } from 'firebase/firestore';
 
 const iconMap: Record<string, React.ElementType> = {
   Heart, Sparkles, Gift, Crown, Activity,
@@ -24,6 +26,8 @@ const INITIAL_STATE: GameState = {
   inventory: { pond: [], aoey: [] },
   pulledIds: { pond: [], aoey: [] },
   redeemedCount: { pond: 0, aoey: 0 },
+  redemptionHistory: { pond: [], aoey: [] },
+  usedCardsHistory: { pond: [], aoey: [] },
   deductions: [],
   taskHistory: { pond: [], aoey: [] }
 };
@@ -35,20 +39,32 @@ function App() {
   const [currentScreen, setCurrentScreen] = useState<ScreenType>('select_user');
   const [taskTab, setTaskTab] = useState<'daily' | 'weekly'>('daily');
   
-  const [gameState, setGameState] = useState<GameState>(() => {
-    const saved = localStorage.getItem('loveGachaStateV3');
-    if (saved) {
-      try { return JSON.parse(saved); } catch (e) { return INITIAL_STATE; }
-    }
-    return INITIAL_STATE;
-  });
+  const [gameState, setGameState] = useState<GameState>(INITIAL_STATE);
+  const [isLoaded, setIsLoaded] = useState(false);
 
   useEffect(() => {
-    localStorage.setItem('loveGachaStateV3', JSON.stringify(gameState));
-  }, [gameState]);
+    const unsub = onSnapshot(gameStateRef, (doc) => {
+      if (doc.exists()) {
+        setGameState(doc.data() as GameState);
+      } else {
+        setDoc(gameStateRef, INITIAL_STATE).catch(console.error);
+      }
+      setIsLoaded(true);
+    });
+    return unsub;
+  }, []);
+
+  const updateGameState = (updater: (prev: GameState) => GameState) => {
+    setGameState(prev => {
+      const nextState = updater(prev);
+      setDoc(gameStateRef, nextState).catch(console.error);
+      return nextState;
+    });
+  };
 
   // Admin states
   const [showAdminPanel, setShowAdminPanel] = useState(false);
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [adminPassword, setAdminPassword] = useState('');
   const [adminError, setAdminError] = useState(false);
 
@@ -67,7 +83,7 @@ function App() {
     e.preventDefault();
     if (adminPassword.toLowerCase() === 'pond33' || adminPassword.toLowerCase() === 'aoey36') {
       if (currentUser) {
-        setGameState(prev => ({
+        updateGameState(prev => ({
           ...prev,
           points: {
             ...prev.points,
@@ -114,7 +130,7 @@ function App() {
         const result = pullRandomCard(gameState.pulledIds[currentUser], currentUser);
         
         if (result) {
-          setGameState(prev => ({
+          updateGameState(prev => ({
             ...prev,
             points: { ...prev.points, [currentUser]: prev.points[currentUser] - 10 },
             inventory: { ...prev.inventory, [currentUser]: [result, ...prev.inventory[currentUser]] },
@@ -136,31 +152,51 @@ function App() {
     }
   };
 
+  const getMonthlyRedeemedCount = (user: UserType) => {
+    const legacyHistory = gameState.redemptionHistory?.[user] || [];
+    const newHistory = gameState.usedCardsHistory?.[user] || [];
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+    
+    const legacyCount = legacyHistory.filter(ts => ts >= startOfMonth).length;
+    const newCount = newHistory.filter(r => r.timestamp >= startOfMonth).length;
+    
+    return legacyCount + newCount;
+  };
+
   const handleUseCard = (card: Card) => {
     if (!currentUser) return;
-    if (gameState.redeemedCount[currentUser] >= 3) return;
+    const currentRedeemed = getMonthlyRedeemedCount(currentUser);
+    if (currentRedeemed >= 10) return;
 
-    setGameState(prev => ({
+    updateGameState(prev => ({
       ...prev,
       inventory: {
         ...prev.inventory,
         [currentUser]: prev.inventory[currentUser].filter(c => c.id !== card.id)
       },
+      usedCardsHistory: {
+        ...prev.usedCardsHistory,
+        [currentUser]: [
+          { card, timestamp: Date.now() },
+          ...(prev.usedCardsHistory?.[currentUser] || [])
+        ]
+      },
       redeemedCount: {
         ...prev.redeemedCount,
-        [currentUser]: prev.redeemedCount[currentUser] + 1
+        [currentUser]: (prev.redeemedCount?.[currentUser] || 0) + 1
       }
     }));
     
     confetti({ particleCount: 100, spread: 70, origin: { y: 0.3 } });
     const targetName = currentUser === 'pond' ? 'พี่เอ๋ย' : 'ปังปอนด์';
-    alert(`🎉 ใช้คูปอง: ${card.title} สำเร็จ! แคปหน้านี้ส่งไปทวงสัญญาจาก ${targetName} ได้เลย! (เหลือสิทธิ์ใช้ ${2 - gameState.redeemedCount[currentUser]} ครั้ง)`);
+    alert(`🎉 ใช้คูปอง: ${card.title} สำเร็จ! แคปหน้านี้ส่งไปทวงสัญญาจาก ${targetName} ได้เลย! (เหลือโควต้าเดือนนี้อีก ${9 - currentRedeemed} ใบ)`);
   };
 
   const handleDiscardCard = (card: Card) => {
     if (!currentUser) return;
     if (confirm(`ทิ้งคูปอง "${card.title}" ใช่ไหม? (ทิ้งแล้วทิ้งเลยนะ!)`)) {
-      setGameState(prev => ({
+      updateGameState(prev => ({
         ...prev,
         inventory: {
           ...prev.inventory,
@@ -175,7 +211,7 @@ function App() {
     const partner = currentUser === 'pond' ? 'aoey' : 'pond';
     const partnerName = partner === 'pond' ? 'ปังปอนด์' : 'เอ๋ย';
     
-    setGameState(prev => ({
+    updateGameState(prev => ({
       ...prev,
       points: {
         ...prev.points,
@@ -206,7 +242,7 @@ function App() {
       target: partner
     };
 
-    setGameState(prev => ({
+    updateGameState(prev => ({
       ...prev,
       points: {
         ...prev.points,
@@ -533,7 +569,7 @@ function App() {
   const renderInventory = () => {
     if (!currentUser) return null;
     const inventory = gameState.inventory[currentUser];
-    const redeemedCount = gameState.redeemedCount[currentUser];
+    const redeemedCount = getMonthlyRedeemedCount(currentUser);
 
     return (
       <motion.div initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="p-6 pb-20 w-full max-w-md mx-auto min-h-screen relative z-10">
@@ -544,10 +580,13 @@ function App() {
 
         <div className="bg-rose-50 border border-rose-100 p-5 rounded-3xl mb-6 flex items-center justify-between shadow-sm">
           <div>
-            <p className="text-sm text-gray-500 font-medium mb-1">สิทธิ์การใช้คูปองในซีซั่นนี้</p>
-            <p className="text-gray-800 font-bold">ใช้ไปแล้ว <span className="text-rose-500 text-lg">{redeemedCount} / 3</span> ครั้ง</p>
+            <p className="text-sm text-gray-500 font-medium mb-1">สิทธิ์การใช้คูปองในเดือนนี้</p>
+            <p className="text-gray-800 font-bold">ใช้ไปแล้ว <span className="text-rose-500 text-lg">{redeemedCount} / 10</span> ใบ</p>
           </div>
-          <div className="w-14 h-14 bg-white rounded-full flex items-center justify-center shadow-sm">
+          <div 
+            onClick={() => setShowHistoryModal(true)}
+            className="w-14 h-14 bg-white rounded-full flex items-center justify-center shadow-sm cursor-pointer hover:bg-rose-100 transition-colors"
+          >
             <Gift className="w-7 h-7 text-rose-400" />
           </div>
         </div>
@@ -561,7 +600,7 @@ function App() {
           <div className="space-y-4">
             {inventory.map((card, idx) => {
               const Icon = iconMap[card.iconName] || Heart;
-              const isMaxRedeemed = redeemedCount >= 3;
+              const isMaxRedeemed = redeemedCount >= 10;
               
               return (
                 <div key={`${card.id}-${idx}`} className={`bg-gradient-to-r ${card.bgGradient} p-6 rounded-3xl border-l-8 ${card.themeColor} shadow-md relative`}>
@@ -599,9 +638,75 @@ function App() {
             })}
           </div>
         )}
+
+        {/* History Modal */}
+        <AnimatePresence>
+          {showHistoryModal && (
+            <motion.div 
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-6"
+              onClick={() => setShowHistoryModal(false)}
+            >
+              <motion.div 
+                initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
+                className="bg-white rounded-3xl p-6 w-full max-w-md max-h-[80vh] overflow-y-auto shadow-2xl relative"
+                onClick={e => e.stopPropagation()}
+              >
+                <button onClick={() => setShowHistoryModal(false)} className="absolute top-4 right-4 p-2 bg-gray-100 rounded-full text-gray-600 hover:bg-gray-200"><X className="w-5 h-5"/></button>
+                <div className="flex items-center gap-3 mb-6">
+                  <div className="w-12 h-12 bg-rose-100 text-rose-500 rounded-full flex justify-center items-center"><Gift className="w-6 h-6"/></div>
+                  <div>
+                    <h3 className="text-xl font-bold text-gray-800">ประวัติการใช้คูปอง</h3>
+                    <p className="text-sm text-gray-500">คูปองที่ใช้ไปในเดือนนี้</p>
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  {(gameState.usedCardsHistory?.[currentUser] || [])
+                    .filter(record => {
+                      const now = new Date();
+                      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+                      return record.timestamp >= startOfMonth;
+                    })
+                    .sort((a, b) => b.timestamp - a.timestamp)
+                    .map((record, idx) => (
+                      <div key={idx} className={`p-4 rounded-2xl border border-gray-100 bg-gray-50 flex gap-3 items-center`}>
+                        <div className={`w-10 h-10 rounded-full flex items-center justify-center bg-white shadow-sm border ${record.card.themeColor}`}>
+                           <CheckCircle className={`w-5 h-5 ${record.card.textColor}`} />
+                        </div>
+                        <div className="flex-1">
+                          <p className="font-bold text-gray-800 text-sm">{record.card.title}</p>
+                          <div className="flex items-center gap-1 text-xs text-gray-400 mt-1">
+                            <Clock className="w-3 h-3"/>
+                            {new Date(record.timestamp).toLocaleString('th-TH', { 
+                              dateStyle: 'medium', timeStyle: 'short' 
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                    {getMonthlyRedeemedCount(currentUser) === 0 && (
+                      <div className="text-center py-8 text-gray-400 font-medium bg-gray-50 rounded-2xl border border-dashed border-gray-200">
+                        ยังไม่มีประวัติการใช้คูปองในเดือนนี้
+                      </div>
+                    )}
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </motion.div>
     );
   };
+
+  if (!isLoaded) {
+    return (
+      <div className="min-h-screen bg-pink-50 flex flex-col items-center justify-center font-sans">
+        <Heart className="w-12 h-12 text-rose-500 animate-pulse mb-4" />
+        <p className="text-gray-500 font-medium">กำลังเชื่อมต่อข้อมูลหัวใจ... 💖</p>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-pink-50 selection:bg-pink-200 font-sans relative overflow-x-hidden flex justify-center">

@@ -1,0 +1,11 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Allow public read and write access for the shared game state
+    // Note: Since this is a private couple app, we are leaving it open for simplicity,
+    // as we are not using real Firebase Auth.
+    match /game/{document=**} {
+      allow read, write: if true;
+    }
+  }
+}

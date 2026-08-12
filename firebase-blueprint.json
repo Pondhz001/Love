@@ -1,0 +1,29 @@
+{
+  "projectInfo": {
+    "name": "Love Gacha",
+    "description": "Love Gacha Realtime Sync"
+  },
+  "authRequirements": {
+    "authMandatory": false
+  },
+  "collections": [
+    {
+      "name": "game",
+      "path": "game",
+      "description": "Stores the singleton game state",
+      "documents": [
+        {
+          "id": "state",
+          "fields": [
+            { "name": "points", "type": "map" },
+            { "name": "inventory", "type": "map" },
+            { "name": "pulledIds", "type": "map" },
+            { "name": "redeemedCount", "type": "map" },
+            { "name": "deductions", "type": "array" },
+            { "name": "taskHistory", "type": "map" }
+          ]
+        }
+      ]
+    }
+  ]
+}

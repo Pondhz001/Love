@@ -40,7 +40,14 @@ export interface GameState {
   points: Record<UserType, number>;
   inventory: Record<UserType, Card[]>;
   pulledIds: Record<UserType, string[]>;
-  redeemedCount: Record<UserType, number>;
+  redeemedCount: Record<UserType, number>; // Legacy
+  redemptionHistory?: Record<UserType, number[]>; // Legacy
+  usedCardsHistory?: Record<UserType, UsedCardRecord[]>; // New detailed history
   deductions: DeductionInfo[];
   taskHistory: Record<UserType, TaskRecord[]>;
+}
+
+export interface UsedCardRecord {
+  card: Card;
+  timestamp: number;
 }
